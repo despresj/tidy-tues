@@ -7,26 +7,88 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-library(tidyverse)
+library(tidyverse) 
 library(tidytuesdayR)
+library(scales)
+theme_set(theme_light())
 ```
 
-## R Markdown
+```{r}
+tuesdata <- tidytuesdayR::tt_load('2020-05-26')
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
-```{r cars}
-summary(cars)
+cocktails <- tuesdata$cocktails
 ```
 
-## Including Plots
+```{r}
+mr_boston <- tuesdata$boston_cocktails
 
-You can also embed plots, for example:
+mr_boston %>% 
+  count(name, sort = TRUE)
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+mr_boston %>% 
+  count(ingredient, sort = T) %>% 
+  view()
+
+
+
+mr_boston %>% 
+  distinct(name, category) %>% 
+  count(category, sort = T)
+
+n_recipes <- n_distinct(mr_boston$name)
+
+mr_boston %>% 
+  count(category, ingredient, sort = TRUE) %>% 
+  mutate(category = fct_lump(category, 4),
+         ingredient = fct_lump(ingredient, 20)) %>% 
+  mutate(ingredient  = fct_reorder(ingredient, n, sum)) %>% 
+  filter(ingredient != "Other") %>% 
+  ggplot(aes(n / n_recipes, ingredient, fill = category)) + 
+  geom_col() + 
+  scale_x_continuous(labels = percent_format()) +
+  labs(title = "Most Common Ingredients in Mr. Boston Recipes",
+       y = "Ingredient",
+       x = "% of recipes",
+       fill = "Category")
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+What ingredents tend to appear together
+
+```{r}
+library(widyr)
+library(tidytext)
+
+ingredinet_pairs <- mr_boston %>% 
+  add_count(ingredient) %>% 
+  filter(n >= 10) %>% 
+  pairwise_cor(ingredient, name, sort = TRUE)
+
+ingredinet_pairs %>% 
+  filter(item1 %in% c("Gin", "Tequila", "Mezcal", "Brandy", "Bourbon whiskey", "Vodka")) %>% 
+  group_by(item1) %>% 
+  top_n(10, correlation) %>% 
+  mutate(item2 = reorder_within(item2, correlation, item1)) %>% 
+  ggplot(aes(correlation, item2)) + 
+  geom_col() + 
+  facet_wrap(~ item1, scales = "free_y") + 
+  scale_y_reordered() + 
+  labs(title = "What ingredients are most correlated with particular?")
+
+```
+
+
+
+```{r}
+library(ggraph)
+library(igraph)
+
+ingredinet_pairs %>% 
+  head(75) %>% 
+  graph_from_data_frame() %>% 
+  ggraph(layout = "fr") + 
+  geom_edge_link() +
+  geom_node_text(aes(label = name), repel = TRUE) + 
+  geom_node_point()
+```
+
+
