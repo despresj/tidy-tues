@@ -3,19 +3,21 @@ title: "Untitled"
 author: "Joe Despres"
 date: "6/5/2020"
 output: html_document
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse) 
 library(tidytuesdayR)
+library(tidyr)
 library(scales)
 theme_set(theme_light())
 ```
 
 ```{r}
 tuesdata <- tidytuesdayR::tt_load('2020-05-26')
-
 cocktails <- tuesdata$cocktails
 ```
 
@@ -28,8 +30,6 @@ mr_boston %>%
 mr_boston %>% 
   count(ingredient, sort = T) %>% 
   view()
-
-
 
 mr_boston %>% 
   distinct(name, category) %>% 
@@ -77,18 +77,124 @@ ingredinet_pairs %>%
 ```
 
 
+```{r}
+mr_boston %>% 
+  count(measure, sort = TRUE) 
+
+mr_boston_parsed <- mr_boston %>% 
+  extract(measure, "amount", regex = "(.*) oz", remove = FALSE ) %>% 
+  extract(amount, "ones", "(^\\d+$|^\\d+ )", convert = TRUE, remove = FALSE) %>% 
+  extract(amount, c("numerator", "denominator"), 
+            regex = "(\\d+)\\/(\\d+)", convert = TRUE, remove = FALSE) %>% 
+  replace_na(list(ones = 0, numerator = 0, denominator = 1)) %>% 
+  mutate(oz = ones + (numerator / denominator),
+         oz = na_if(oz, 0))
+  
+
+ingredients_summarised <- mr_boston_parsed %>% 
+  group_by(name) %>% 
+  mutate(percentile = row_number() / n() ) %>% 
+  group_by(ingredient) %>% 
+  summarise(n = n(),
+            avg_position = mean(ingredient_number) / 5, 
+            avg_serving = mean(oz, na.rm = TRUE)) %>% 
+  arrange(desc(n))
+```
+
+
+```{r}
+library(ggrepel)
+
+ingredients_summarised %>% 
+  head(30) %>% 
+  ggplot(aes(avg_position, avg_serving)) + 
+  geom_point(aes(size = n / n_recipes)) + 
+  geom_text_repel(aes(label = ingredient)) + 
+  scale_x_continuous(labels = percent_format()) + 
+  scale_size_continuous(labels = percent_format()) + 
+  labs(y = "Average serving size",
+       x = "Average position within drink",
+       size = "% of recipies")
+```
+
+```{r}
+ingredients_summarised %>% 
+  filter(n >= 10) %>% 
+  ggplot(aes(n, avg_serving)) + 
+  geom_point() +
+  scale_x_log10() + 
+  geom_text(aes(label = ingredient), check_overlap = TRUE,
+            vjust = 1, hjust = 1)
+
+ingredients_summarised %>% 
+  filter(n >= 10) %>% 
+  arrange(desc(avg_serving)) %>% 
+  head(12) %>% 
+  mutate(ingredient = fct_reorder(ingredient, avg_serving)) %>% 
+  ggplot(aes( avg_serving, ingredient)) + 
+  geom_col() + 
+  labs(title = "what ingredients have the largest serving size?"
+       )
+```
+
+largest pours are of juices and whiskeys
+
+# clustering
+
 
 ```{r}
 library(ggraph)
 library(igraph)
 
+ingredients_summarised
+
+top_cors <- ingredinet_pairs %>% 
+  head(150)
+
+ingredient_info <- ingredients_summarised %>% 
+  filter(ingredient %in% top_cors$item1)
+
 ingredinet_pairs %>% 
-  head(75) %>% 
-  graph_from_data_frame() %>% 
+  head(150) %>% 
+  graph_from_data_frame(vertices = ingredient_info) %>% 
   ggraph(layout = "fr") + 
   geom_edge_link() +
   geom_node_text(aes(label = name), repel = TRUE) + 
-  geom_node_point()
+  geom_node_point(aes(size = n * 1.1, color = avg_position)) + 
+  scale_color_gradient2(low = "red", high = "blue", midpoint = 0.5) + 
+  labs( size = "# of recipeis",
+        color = "Avg positon of drink",
+        title = "The universe of cocktail", 
+        subtitle = " Connected ingredients appeat to be in the same recepie \n.Red ingredients in the recepe, blue tend to be later")
 ```
+
+
+### PCA
+
+```{r}
+ingredient_svd <- mr_boston %>% 
+  distinct(ingredient, name) %>% 
+  mutate(value = 1) %>% 
+widely_svd(ingredient, name, value)
+
+ingredient_svd %>% 
+  filter(dimension <= 5, dimension > 1) %>% 
+  mutate(dimension = paste0("PC", dimension)) %>% 
+  group_by(dimension) %>%
+  top_n(16, abs(value)) %>% 
+  mutate(ingredient = reorder_within(ingredient, value, dimension)) %>% 
+  ggplot(aes(value,ingredient, fill = value > 0)) + 
+  geom_col(show.legend = FALSE) + 
+  scale_y_reordered() + 
+  facet_wrap(~ dimension, scales = "free_y") + 
+  labs(x = "Principal coment value",
+       y = "Ingredient",
+       title = "What are the sources of variation")
+```
+
+```{r}
+
+```
+
 
 
